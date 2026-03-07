@@ -4,6 +4,13 @@ import multer from "multer";
 import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
+import SrtParser from "srt-parser-2";
+import {
+  getTextProvider,
+  getTTSProvider,
+  getPublicConfig,
+  updateConfig,
+} from "./server/config.js";
 
 const app = express();
 const PORT = 3000;
@@ -39,9 +46,10 @@ db.exec(`
   );
 `);
 
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
-// API Routes
+// ─── Existing CRUD Routes ───────────────────────────────────────────────
+
 app.get("/api/subtitles", (req, res) => {
   const rows = db.prepare("SELECT * FROM subtitles ORDER BY created_at DESC").all();
   res.json(rows);
@@ -95,7 +103,7 @@ app.post("/api/save-items", async (req, res) => {
           item.examples_zh || "",
           item.synonyms || "",
           item.frequency || "",
-          item.level || "B1" // Default to B1 if not provided
+          item.level || "B1"
         );
       }
     });
@@ -110,7 +118,7 @@ app.post("/api/save-items", async (req, res) => {
 
 app.get("/api/items/:subtitleId", (req, res) => {
   const { subtitleId } = req.params;
-  const { levels } = req.query; // Expecting a comma-separated string or array
+  const { levels } = req.query;
   
   let query = "SELECT * FROM extracted_items WHERE subtitle_id = ?";
   const params: any[] = [subtitleId];
@@ -138,7 +146,121 @@ app.delete("/api/subtitles/:id", (req, res) => {
   }
 });
 
-// Vite middleware for development
+// ─── NEW: AI Provider Routes ────────────────────────────────────────────
+
+/**
+ * POST /api/analyze
+ * Analyze a subtitle using the configured text LLM provider.
+ * Body: { subtitleId: number }
+ */
+app.post("/api/analyze", async (req, res) => {
+  const { subtitleId } = req.body;
+  if (!subtitleId) return res.status(400).json({ error: "subtitleId is required" });
+
+  try {
+    // 1. Fetch subtitle content
+    const subtitle = db.prepare("SELECT * FROM subtitles WHERE id = ?").get(subtitleId) as any;
+    if (!subtitle) return res.status(404).json({ error: "Subtitle not found" });
+
+    // 2. Parse SRT
+    const parser = new SrtParser();
+    const parsed = parser.fromSrt(subtitle.content);
+    const rawText = parsed.map((p: any) => p.text).join(" ").slice(0, 40000);
+
+    // 3. Call configured text provider
+    const provider = getTextProvider();
+    console.log(`[Analyze] Using text provider: ${provider.name}`);
+    const extractedItems = await provider.analyze(rawText);
+
+    // 4. Save items to DB
+    const insert = db.prepare(`
+      INSERT INTO extracted_items (
+        subtitle_id, type, term, meaning_en, meaning_zh, phonetic,
+        part_of_speech, usage_scenarios_en, usage_scenarios_zh,
+        examples_en, examples_zh, synonyms, frequency, level
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const transaction = db.transaction((items: any[]) => {
+      for (const item of items) {
+        insert.run(
+          subtitleId,
+          item.type,
+          item.term,
+          item.meaning_en,
+          item.meaning_zh,
+          item.phonetic || "",
+          item.part_of_speech || "",
+          item.usage_scenarios_en || "",
+          item.usage_scenarios_zh || "",
+          item.examples_en || "",
+          item.examples_zh || "",
+          item.synonyms || "",
+          item.frequency || "",
+          item.level || "B1"
+        );
+      }
+    });
+
+    transaction(extractedItems);
+    res.json({ success: true, count: extractedItems.length, provider: provider.name });
+  } catch (error: any) {
+    console.error("Analyze Error:", error);
+    res.status(500).json({ error: `Analysis failed: ${error.message}` });
+  }
+});
+
+/**
+ * POST /api/tts
+ * Generate speech audio using the configured TTS provider.
+ * Body: { text: string, voice: string }
+ * Returns: WAV audio binary
+ */
+app.post("/api/tts", async (req, res) => {
+  const { text, voice } = req.body;
+  if (!text) return res.status(400).json({ error: "text is required" });
+
+  try {
+    const provider = getTTSProvider();
+    console.log(`[TTS] Using TTS provider: ${provider.name}`);
+    const wavBuffer = await provider.synthesize(text, voice || "American");
+
+    res.set({
+      "Content-Type": "audio/wav",
+      "Content-Length": String(wavBuffer.length),
+    });
+    res.send(wavBuffer);
+  } catch (error: any) {
+    console.error("TTS Error:", error);
+    res.status(500).json({ error: `TTS failed: ${error.message}` });
+  }
+});
+
+/**
+ * GET /api/config
+ * Returns the current provider configuration (no API keys).
+ */
+app.get("/api/config", (req, res) => {
+  res.json(getPublicConfig());
+});
+
+/**
+ * POST /api/config
+ * Update provider configuration at runtime.
+ * Body: Partial<AppConfig> (e.g. { textProvider: "ollama" })
+ */
+app.post("/api/config", (req, res) => {
+  try {
+    updateConfig(req.body);
+    res.json({ success: true, config: getPublicConfig() });
+  } catch (error: any) {
+    console.error("Config Update Error:", error);
+    res.status(500).json({ error: `Config update failed: ${error.message}` });
+  }
+});
+
+// ─── Vite middleware for development ────────────────────────────────────
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

@@ -12,13 +12,13 @@ import {
   Volume2,
   Languages,
   Info,
-  Trash2
+  Trash2,
+  Settings,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { GoogleGenAI, Type, Modality } from "@google/genai";
-import SrtParser from "srt-parser-2";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -47,7 +47,245 @@ type ExtractedItem = {
   level: string;
 };
 
+type ProviderConfig = {
+  textProvider: string;
+  ttsProvider: string;
+  geminiTextModel: string;
+  geminiTtsModel: string;
+  openaiTextModel: string;
+  openaiBaseUrl: string;
+  openaiTtsModel: string;
+  openaiTtsVoice: string;
+  ollamaBaseUrl: string;
+  ollamaTextModel: string;
+  piperBinaryPath: string;
+  piperModelPath: string;
+  hasGeminiKey: boolean;
+  hasOpenaiKey: boolean;
+};
+
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+
+// ─── Settings Panel Component ───────────────────────────────────────────
+
+function SettingsPanel({ 
+  isOpen, 
+  onClose, 
+  config, 
+  onSave 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  config: ProviderConfig | null;
+  onSave: (updates: Partial<ProviderConfig>) => void;
+}) {
+  const [localConfig, setLocalConfig] = useState<Partial<ProviderConfig>>({});
+
+  useEffect(() => {
+    if (config) setLocalConfig({ ...config });
+  }, [config]);
+
+  if (!isOpen || !config) return null;
+
+  const update = (key: string, value: string) => {
+    setLocalConfig(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleSave = () => {
+    onSave(localConfig);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="bg-white rounded-2xl shadow-2xl w-[560px] max-h-[80vh] overflow-y-auto"
+      >
+        <div className="flex items-center justify-between p-6 border-b border-[#E7E5E4]">
+          <div className="flex items-center gap-2">
+            <Settings className="w-5 h-5" />
+            <h2 className="text-lg font-bold">Provider Settings</h2>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-[#F5F5F4] rounded-full transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-8">
+          {/* Text LLM Provider */}
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#78716C] mb-3">Text LLM Provider</h3>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {[
+                { id: 'gemini', label: 'Gemini', available: config.hasGeminiKey },
+                { id: 'openai', label: 'OpenAI', available: config.hasOpenaiKey },
+                { id: 'ollama', label: 'Ollama', available: true },
+              ].map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => update('textProvider', p.id)}
+                  className={cn(
+                    "px-4 py-2.5 rounded-xl text-sm font-medium transition-all border",
+                    localConfig.textProvider === p.id
+                      ? "bg-black text-white border-black"
+                      : "bg-white text-[#57534E] border-[#E7E5E4] hover:border-black/20",
+                    !p.available && "opacity-40"
+                  )}
+                >
+                  {p.label}
+                  {!p.available && <span className="block text-[9px] mt-0.5 opacity-70">No API Key</span>}
+                </button>
+              ))}
+            </div>
+
+            {/* Provider-specific model config */}
+            {localConfig.textProvider === 'gemini' && (
+              <div>
+                <label className="text-xs text-[#A8A29E] block mb-1">Model</label>
+                <input
+                  type="text"
+                  value={localConfig.geminiTextModel || ''}
+                  onChange={e => update('geminiTextModel', e.target.value)}
+                  className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
+                />
+              </div>
+            )}
+            {localConfig.textProvider === 'openai' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-[#A8A29E] block mb-1">Model</label>
+                  <input
+                    type="text"
+                    value={localConfig.openaiTextModel || ''}
+                    onChange={e => update('openaiTextModel', e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-[#A8A29E] block mb-1">Base URL</label>
+                  <input
+                    type="text"
+                    value={localConfig.openaiBaseUrl || ''}
+                    onChange={e => update('openaiBaseUrl', e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
+                  />
+                </div>
+              </div>
+            )}
+            {localConfig.textProvider === 'ollama' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-[#A8A29E] block mb-1">Model</label>
+                  <input
+                    type="text"
+                    value={localConfig.ollamaTextModel || ''}
+                    onChange={e => update('ollamaTextModel', e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-[#A8A29E] block mb-1">Ollama URL</label>
+                  <input
+                    type="text"
+                    value={localConfig.ollamaBaseUrl || ''}
+                    onChange={e => update('ollamaBaseUrl', e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
+                  />
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* TTS Provider */}
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#78716C] mb-3">TTS Provider</h3>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {[
+                { id: 'gemini', label: 'Gemini', available: config.hasGeminiKey },
+                { id: 'openai', label: 'OpenAI', available: config.hasOpenaiKey },
+                { id: 'piper', label: 'Piper (Local)', available: true },
+              ].map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => update('ttsProvider', p.id)}
+                  className={cn(
+                    "px-4 py-2.5 rounded-xl text-sm font-medium transition-all border",
+                    localConfig.ttsProvider === p.id
+                      ? "bg-black text-white border-black"
+                      : "bg-white text-[#57534E] border-[#E7E5E4] hover:border-black/20",
+                    !p.available && "opacity-40"
+                  )}
+                >
+                  {p.label}
+                  {!p.available && <span className="block text-[9px] mt-0.5 opacity-70">No API Key</span>}
+                </button>
+              ))}
+            </div>
+
+            {localConfig.ttsProvider === 'gemini' && (
+              <div>
+                <label className="text-xs text-[#A8A29E] block mb-1">TTS Model</label>
+                <input
+                  type="text"
+                  value={localConfig.geminiTtsModel || ''}
+                  onChange={e => update('geminiTtsModel', e.target.value)}
+                  className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
+                />
+              </div>
+            )}
+            {localConfig.ttsProvider === 'piper' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-[#A8A29E] block mb-1">Piper Binary Path</label>
+                  <input
+                    type="text"
+                    value={localConfig.piperBinaryPath || ''}
+                    onChange={e => update('piperBinaryPath', e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-[#A8A29E] block mb-1">Model Path</label>
+                  <input
+                    type="text"
+                    value={localConfig.piperModelPath || ''}
+                    onChange={e => update('piperModelPath', e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
+                  />
+                </div>
+                <div className="p-3 bg-amber-50 rounded-xl">
+                  <p className="text-xs text-amber-800">
+                    Piper must be installed locally. See <strong>docs/LOCAL_DEPLOYMENT.md</strong> for setup instructions.
+                  </p>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div className="p-6 border-t border-[#E7E5E4] flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 rounded-xl text-sm font-medium text-[#57534E] hover:bg-[#F5F5F4] transition-all"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-5 py-2 rounded-xl text-sm font-medium bg-black text-white hover:bg-zinc-800 transition-all"
+          >
+            Save Changes
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// ─── Main App ───────────────────────────────────────────────────────────
 
 export default function App() {
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
@@ -59,10 +297,13 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeItem, setActiveItem] = useState<ExtractedItem | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [providerConfig, setProviderConfig] = useState<ProviderConfig | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchSubtitles();
+    fetchConfig();
   }, []);
 
   useEffect(() => {
@@ -91,6 +332,30 @@ export default function App() {
     }
   };
 
+  const fetchConfig = async () => {
+    try {
+      const res = await fetch('/api/config');
+      const data = await res.json();
+      setProviderConfig(data);
+    } catch (err) {
+      console.error('Failed to fetch config', err);
+    }
+  };
+
+  const saveConfig = async (updates: Partial<ProviderConfig>) => {
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      const data = await res.json();
+      if (data.config) setProviderConfig(data.config);
+    } catch (err) {
+      console.error('Failed to save config', err);
+    }
+  };
+
   const deleteSubtitle = async (id: number) => {
     if (!confirm('Are you sure you want to delete this subtitle and all its extracted items?')) return;
     try {
@@ -113,63 +378,30 @@ export default function App() {
     );
   };
 
+  // ── TTS via backend API ──
   const playAudio = async (text: string, accent: 'British' | 'American') => {
     if (isPlayingAudio) return;
     setIsPlayingAudio(accent);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const prompt = `Say in a ${accent} accent: ${text}`;
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: prompt }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: accent === 'British' ? 'Kore' : 'Zephyr' },
-            },
-          },
-        },
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: accent }),
       });
 
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (base64Audio) {
-        // Gemini TTS returns raw PCM 16-bit 24kHz. We need to wrap it in a WAV header.
-        const pcmData = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0));
-        const wavHeader = new ArrayBuffer(44);
-        const view = new DataView(wavHeader);
-        
-        // RIFF chunk descriptor
-        view.setUint32(0, 0x52494646, false); // "RIFF"
-        view.setUint32(4, 36 + pcmData.length, true);
-        view.setUint32(8, 0x57415645, false); // "WAVE"
-        
-        // fmt sub-chunk
-        view.setUint32(12, 0x666d7420, false); // "fmt "
-        view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
-        view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
-        view.setUint16(22, 1, true); // NumChannels (1 for mono)
-        view.setUint32(24, 24000, true); // SampleRate (24000 for Gemini TTS)
-        view.setUint32(28, 24000 * 2, true); // ByteRate
-        view.setUint16(32, 2, true); // BlockAlign
-        view.setUint16(34, 16, true); // BitsPerSample
-        
-        // data sub-chunk
-        view.setUint32(36, 0x64617461, false); // "data"
-        view.setUint32(40, pcmData.length, true);
-
-        const blob = new Blob([wavHeader, pcmData], { type: 'audio/wav' });
-        const audioUrl = URL.createObjectURL(blob);
-        const audio = new Audio(audioUrl);
-        audio.onended = () => {
-          setIsPlayingAudio(null);
-          URL.revokeObjectURL(audioUrl);
-        };
-        await audio.play();
-      } else {
-        setIsPlayingAudio(null);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'TTS request failed');
       }
+
+      const audioBlob = await res.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audio.onended = () => {
+        setIsPlayingAudio(null);
+        URL.revokeObjectURL(audioUrl);
+      };
+      await audio.play();
     } catch (err) {
       console.error('Audio playback failed', err);
       setIsPlayingAudio(null);
@@ -199,97 +431,28 @@ export default function App() {
     }
   };
 
+  // ── Analyze via backend API ──
   const processSubtitle = async () => {
     if (!selectedSubtitle) return;
     setIsProcessing(true);
     try {
-      // 1. Fetch subtitle content
-      const subRes = await fetch(`/api/subtitles/${selectedSubtitle.id}`);
-      const subtitle = await subRes.json();
-
-      // 2. Parse subtitle
-      const parser = new SrtParser();
-      const parsed = parser.fromSrt(subtitle.content);
-      // Increase context to 40k characters for more comprehensiveness
-      const rawText = parsed.map(p => p.text).join(" ").slice(0, 40000);
-
-      // 3. Call Gemini AI
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const prompt = `
-        Analyze the following movie subtitle text and extract ALL English words, idioms, collocations, slangs, and grammar points that a learner might want to study.
-        
-        BE EXTREMELY EXHAUSTIVE. DO NOT SKIP:
-        - Words in ALL CAPS (e.g., "INHALES", "MUMBLES", "STAMMERS", "TOOTS") - these are often important for context. Label these as "stage direction" or "sound effect".
-        - Specialized or formal terms (e.g., "tetanus", "solicitor", "impersonating", "commandeered", "locomotive").
-        - Descriptive adjectives and adverbs (e.g., "bonneted", "artistically", "grisly").
-        - Multi-word phrases and collocations (e.g., "over the course of a year", "big-shot", "commandeered the biggest").
-        - Phrasal verbs and idioms.
-        - Any word that is NOT extremely basic (A1 level).
-        
-        For each item, categorize it into a CEFR level (A1, A2, B1, B2, C1, C2).
-        
-        For each item, provide:
-        1. Term (The exact word or phrase)
-        2. Type (word, idiom, collocation, slang, grammar, stage direction, sound effect)
-        3. Meaning in English
-        4. Meaning in Chinese
-        5. Phonetic symbols
-        6. Part of speech
-        7. Common usage scenarios (English & Chinese)
-        8. Example sentences (English & Chinese)
-        9. Synonyms
-        10. Frequency in daily life (e.g., Very High, High, Medium, Low)
-        11. CEFR Level (A1, A2, B1, B2, C1, C2)
-        
-        Text: ${rawText}
-      `;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                term: { type: Type.STRING },
-                type: { type: Type.STRING, description: "One of: word, idiom, collocation, slang, grammar, stage direction, sound effect" },
-                meaning_en: { type: Type.STRING },
-                meaning_zh: { type: Type.STRING },
-                phonetic: { type: Type.STRING },
-                part_of_speech: { type: Type.STRING },
-                usage_scenarios_en: { type: Type.STRING },
-                usage_scenarios_zh: { type: Type.STRING },
-                examples_en: { type: Type.STRING },
-                examples_zh: { type: Type.STRING },
-                synonyms: { type: Type.STRING },
-                frequency: { type: Type.STRING },
-                level: { type: Type.STRING, description: "CEFR Level: A1, A2, B1, B2, C1, or C2" },
-              },
-              required: ["term", "type", "meaning_en", "meaning_zh", "level"]
-            }
-          }
-        }
-      });
-
-      const extractedItems = JSON.parse(response.text || "[]");
-
-      // 4. Save items to backend
-      await fetch('/api/save-items', {
+      const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          subtitleId: selectedSubtitle.id, 
-          items: extractedItems
-        }),
+        body: JSON.stringify({ subtitleId: selectedSubtitle.id }),
       });
 
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Analysis failed');
+      }
+
+      const result = await res.json();
+      console.log(`Analysis complete: ${result.count} items extracted via ${result.provider}`);
       await fetchItems(selectedSubtitle.id, selectedLevels);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Processing failed', err);
-      alert('AI Processing failed. Please check your console for details.');
+      alert(`AI Processing failed: ${err.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -303,6 +466,18 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-[#F5F5F4] text-[#1C1917] font-sans overflow-hidden">
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {showSettings && (
+          <SettingsPanel
+            isOpen={showSettings}
+            onClose={() => setShowSettings(false)}
+            config={providerConfig}
+            onSave={saveConfig}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Sidebar */}
       <aside className="w-72 border-r border-[#E7E5E4] bg-white flex flex-col">
         <div className="p-6 border-bottom border-[#E7E5E4]">
@@ -361,6 +536,22 @@ export default function App() {
               <p className="text-xs text-[#A8A29E]">No subtitles uploaded yet.</p>
             </div>
           )}
+        </div>
+
+        {/* Settings button at bottom of sidebar */}
+        <div className="p-4 border-t border-[#E7E5E4]">
+          <button
+            onClick={() => setShowSettings(true)}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-[#57534E] hover:bg-[#F5F5F4] transition-all"
+          >
+            <Settings className="w-4 h-4 text-[#A8A29E]" />
+            <span className="text-sm font-medium">Provider Settings</span>
+            {providerConfig && (
+              <span className="ml-auto text-[10px] font-bold text-[#A8A29E] uppercase">
+                {providerConfig.textProvider}
+              </span>
+            )}
+          </button>
         </div>
       </aside>
 
