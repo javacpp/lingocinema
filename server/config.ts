@@ -28,6 +28,10 @@ export interface AppConfig {
   ollamaBaseUrl: string;
   ollamaTextModel: string;
 
+  // llama.cpp
+  llamacppBaseUrl: string;
+  llamacppTextModel: string;
+
   // Piper TTS
   piperBinaryPath: string;
   piperModelPath: string;
@@ -53,6 +57,9 @@ export function loadConfig(): AppConfig {
     ollamaBaseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
     ollamaTextModel: process.env.OLLAMA_TEXT_MODEL || "llama3",
 
+    llamacppBaseUrl: process.env.LLAMACPP_BASE_URL || "http://localhost:8080",
+    llamacppTextModel: process.env.LLAMACPP_TEXT_MODEL || "default",
+
     piperBinaryPath: process.env.PIPER_BINARY_PATH || "piper",
     piperModelPath: process.env.PIPER_MODEL_PATH || "",
   };
@@ -74,6 +81,8 @@ function buildTextProvider(): TextProvider {
     openaiModel: currentConfig.openaiTextModel,
     ollamaBaseUrl: currentConfig.ollamaBaseUrl,
     ollamaModel: currentConfig.ollamaTextModel,
+    llamacppBaseUrl: currentConfig.llamacppBaseUrl,
+    llamacppModel: currentConfig.llamacppTextModel,
   });
 }
 
@@ -120,6 +129,8 @@ export function getPublicConfig() {
     openaiTtsVoice: currentConfig.openaiTtsVoice,
     ollamaBaseUrl: currentConfig.ollamaBaseUrl,
     ollamaTextModel: currentConfig.ollamaTextModel,
+    llamacppBaseUrl: currentConfig.llamacppBaseUrl,
+    llamacppTextModel: currentConfig.llamacppTextModel,
     piperBinaryPath: currentConfig.piperBinaryPath,
     piperModelPath: currentConfig.piperModelPath,
     // Boolean flags for available providers
@@ -135,7 +146,8 @@ export function updateConfig(partial: Partial<AppConfig>) {
   if (partial.textProvider !== undefined || partial.geminiApiKey !== undefined ||
       partial.geminiTextModel !== undefined || partial.openaiApiKey !== undefined ||
       partial.openaiBaseUrl !== undefined || partial.openaiTextModel !== undefined ||
-      partial.ollamaBaseUrl !== undefined || partial.ollamaTextModel !== undefined) {
+      partial.ollamaBaseUrl !== undefined || partial.ollamaTextModel !== undefined ||
+      partial.llamacppBaseUrl !== undefined || partial.llamacppTextModel !== undefined) {
     textProviderInstance = null; // will be rebuilt on next call
   }
   if (partial.ttsProvider !== undefined || partial.geminiApiKey !== undefined ||

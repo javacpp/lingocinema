@@ -53,7 +53,3 @@ Simply upload a subtitle, and the app uses **AI** to exhaustively analyse the te
 
 4. **Open the App**
    Navigate to [http://localhost:3000](http://localhost:3000) in your browser!
-
-## 📖 Additional Documentation
-* [Detailed Project Architecture & API](./docs/DOCUMENTATION.md)
-* [Local Deployment Guide (Ollama & local Piper TTS Setup)](./docs/LOCAL_DEPLOYMENT.md)

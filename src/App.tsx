@@ -58,6 +58,8 @@ type ProviderConfig = {
   openaiTtsVoice: string;
   ollamaBaseUrl: string;
   ollamaTextModel: string;
+  llamacppBaseUrl: string;
+  llamacppTextModel: string;
   piperBinaryPath: string;
   piperModelPath: string;
   hasGeminiKey: boolean;
@@ -118,11 +120,12 @@ function SettingsPanel({
           {/* Text LLM Provider */}
           <section>
             <h3 className="text-xs font-bold uppercase tracking-wider text-[#78716C] mb-3">Text LLM Provider</h3>
-            <div className="grid grid-cols-3 gap-2 mb-4">
+            <div className="grid grid-cols-2 gap-2 mb-4">
               {[
                 { id: 'gemini', label: 'Gemini', available: config.hasGeminiKey },
                 { id: 'openai', label: 'OpenAI', available: config.hasOpenaiKey },
                 { id: 'ollama', label: 'Ollama', available: true },
+                { id: 'llamacpp', label: 'llama.cpp', available: true },
               ].map(p => (
                 <button
                   key={p.id}
@@ -192,6 +195,28 @@ function SettingsPanel({
                     type="text"
                     value={localConfig.ollamaBaseUrl || ''}
                     onChange={e => update('ollamaBaseUrl', e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
+                  />
+                </div>
+              </div>
+            )}
+            {localConfig.textProvider === 'llamacpp' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-[#A8A29E] block mb-1">Model (optional)</label>
+                  <input
+                    type="text"
+                    value={localConfig.llamacppTextModel || ''}
+                    onChange={e => update('llamacppTextModel', e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-[#A8A29E] block mb-1">llama.cpp Base URL</label>
+                  <input
+                    type="text"
+                    value={localConfig.llamacppBaseUrl || ''}
+                    onChange={e => update('llamacppBaseUrl', e.target.value)}
                     className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
                   />
                 </div>

@@ -1,5 +1,5 @@
 import { GoogleGenAI, Modality } from "@google/genai";
-import { execFile } from "child_process";
+import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
 import path from "path";
@@ -110,7 +110,7 @@ export class PiperTTSProvider implements TTSProvider {
     try {
       // Piper reads text from stdin and writes WAV to --output_file
       await new Promise<void>((resolve, reject) => {
-        const proc = require("child_process").spawn(
+        const proc = spawn(
           this.binaryPath,
           ["--model", this.modelPath, "--output_file", tmpFile],
           { stdio: ["pipe", "pipe", "pipe"] }
