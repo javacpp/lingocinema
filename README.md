@@ -64,5 +64,3 @@ Simply upload a subtitle, and the app uses **AI** to exhaustively analyse the te
 
 4. **Open the App**
    Navigate to [http://localhost:3000](http://localhost:3000) in your browser!
-5. **Offline Local AI Deployment**
-   Want to run models entirely offline without needing any cloud API keys? Read our [Local Deployment Guide](docs/LOCAL_DEPLOYMENT.md) for full instructions on configuring **llama.cpp**, **Ollama**, and native **Piper TTS** engines!
