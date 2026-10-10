@@ -81,10 +81,15 @@ function SettingsPanel({
   config: ProviderConfig | null;
   onSave: (updates: Partial<ProviderConfig>) => void;
 }) {
-  const [localConfig, setLocalConfig] = useState<Partial<ProviderConfig>>({});
+  const [localConfig, setLocalConfig] = useState<Partial<ProviderConfig>>(() => config || {});
 
   useEffect(() => {
-    if (config) setLocalConfig({ ...config });
+    if (config) {
+      const timer = setTimeout(() => {
+        setLocalConfig({ ...config });
+      }, 0);
+      return () => clearTimeout(timer);
+    }
   }, [config]);
 
   if (!isOpen || !config) return null;
@@ -326,6 +331,36 @@ export default function App() {
   const [providerConfig, setProviderConfig] = useState<ProviderConfig | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const fetchSubtitles = async () => {
+    try {
+      const res = await fetch('/api/subtitles');
+      const data = await res.json();
+      setTimeout(() => setSubtitles(data.data || []), 0);
+    } catch (err) {
+      console.error('Failed to fetch subtitles', err);
+    }
+  };
+
+  const fetchItems = async (id: number, levels: string[]) => {
+    try {
+      const res = await fetch(`/api/items/${id}?levels=${levels.join(',')}`);
+      const data = await res.json();
+      setTimeout(() => setItems(data.data || []), 0);
+    } catch (err) {
+      console.error('Failed to fetch items', err);
+    }
+  };
+
+  const fetchConfig = async () => {
+    try {
+      const res = await fetch('/api/config');
+      const data = await res.json();
+      setTimeout(() => setProviderConfig(data), 0);
+    } catch (err) {
+      console.error('Failed to fetch config', err);
+    }
+  };
+
   useEffect(() => {
     fetchSubtitles();
     fetchConfig();
@@ -336,36 +371,6 @@ export default function App() {
       fetchItems(selectedSubtitle.id, selectedLevels);
     }
   }, [selectedSubtitle, selectedLevels]);
-
-  const fetchSubtitles = async () => {
-    try {
-      const res = await fetch('/api/subtitles');
-      const data = await res.json();
-      setSubtitles(data);
-    } catch (err) {
-      console.error('Failed to fetch subtitles', err);
-    }
-  };
-
-  const fetchItems = async (id: number, levels: string[]) => {
-    try {
-      const res = await fetch(`/api/items/${id}?levels=${levels.join(',')}`);
-      const data = await res.json();
-      setItems(data);
-    } catch (err) {
-      console.error('Failed to fetch items', err);
-    }
-  };
-
-  const fetchConfig = async () => {
-    try {
-      const res = await fetch('/api/config');
-      const data = await res.json();
-      setProviderConfig(data);
-    } catch (err) {
-      console.error('Failed to fetch config', err);
-    }
-  };
 
   const saveConfig = async (updates: Partial<ProviderConfig>) => {
     try {
@@ -448,7 +453,7 @@ export default function App() {
       });
       const data = await res.json();
       await fetchSubtitles();
-      setSelectedSubtitle(data);
+      setSelectedSubtitle(data.data);
     } catch (err) {
       console.error('Upload failed', err);
     } finally {
@@ -472,12 +477,12 @@ export default function App() {
         throw new Error(err.error || 'Analysis failed');
       }
 
-      const result = await res.json();
-      console.log(`Analysis complete: ${result.count} items extracted via ${result.provider}`);
+      const result = (await res.json()).data;
+      console.log(`Analysis complete: ${result.count} items extracted`);
       await fetchItems(selectedSubtitle.id, selectedLevels);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Processing failed', err);
-      alert(`AI Processing failed: ${err.message}`);
+      alert(`AI Processing failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsProcessing(false);
     }

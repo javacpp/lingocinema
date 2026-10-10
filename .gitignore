@@ -9,3 +9,4 @@ coverage/
 *onnx*
 *.db
 docs/
+.antigravitycli/

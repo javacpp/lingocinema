@@ -1,265 +1,255 @@
-import express from "express";
+import express, { Request, Response } from "express";
 import { createServer as createViteServer } from "vite";
 import multer from "multer";
-import Database from "better-sqlite3";
-import fs from "fs";
-import path from "path";
 import SrtParser from "srt-parser-2";
-import {
-  getTextProvider,
-  getTTSProvider,
-  getPublicConfig,
-  updateConfig,
-} from "./server/config.js";
+import dotenv from "dotenv";
+
+import { getDatabase } from "./db/index.js";
+import { createTextProvider } from "./providers/text/index.js";
+import { createTTSProvider } from "./providers/tts/index.js";
+import { TextProvider } from "./providers/text/interface.js";
+import { TTSProvider } from "./providers/tts/interface.js";
+
+dotenv.config({ path: [".env.local", ".env"] });
 
 const app = express();
 const PORT = 3000;
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ storage: multer.memoryStorage() });
 
-// Database initialization
-const db = new Database("lingocinema.db");
-db.exec(`
-  CREATE TABLE IF NOT EXISTS subtitles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    filename TEXT,
-    content TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+const db = getDatabase();
 
-  CREATE TABLE IF NOT EXISTS extracted_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    subtitle_id INTEGER,
-    type TEXT, -- word, idiom, collocation, slang, grammar
-    term TEXT,
-    meaning_en TEXT,
-    meaning_zh TEXT,
-    phonetic TEXT,
-    part_of_speech TEXT,
-    usage_scenarios_en TEXT,
-    usage_scenarios_zh TEXT,
-    examples_en TEXT,
-    examples_zh TEXT,
-    synonyms TEXT,
-    frequency TEXT,
-    level TEXT, -- A1, A2, B1, B2, C1, C2
-    FOREIGN KEY (subtitle_id) REFERENCES subtitles(id)
-  );
-`);
+// ─── Provider State ─────────────────────────────────────────────────────
+
+interface AppConfig {
+  textProvider: string;
+  ttsProvider: string;
+  geminiTextModel: string;
+  geminiTtsModel: string;
+  openaiTextModel: string;
+  openaiBaseUrl: string;
+  openaiTtsModel: string;
+  openaiTtsVoice: string;
+  ollamaBaseUrl: string;
+  ollamaTextModel: string;
+  llamacppBaseUrl: string;
+  llamacppTextModel: string;
+  piperBinaryPath: string;
+  piperModelPath: string;
+  geminiApiKey: string;
+  openaiApiKey: string;
+}
+
+const currentConfig: AppConfig = {
+  textProvider: process.env.TEXT_PROVIDER || "gemini",
+  ttsProvider: process.env.TTS_PROVIDER || "gemini",
+  geminiTextModel: process.env.GEMINI_TEXT_MODEL || "gemini-3-flash-preview",
+  geminiTtsModel: process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts",
+  openaiTextModel: process.env.OPENAI_TEXT_MODEL || "gpt-4o",
+  openaiBaseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com",
+  openaiTtsModel: process.env.OPENAI_TTS_MODEL || "tts-1",
+  openaiTtsVoice: process.env.OPENAI_TTS_VOICE || "alloy",
+  ollamaBaseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
+  ollamaTextModel: process.env.OLLAMA_TEXT_MODEL || "llama3",
+  llamacppBaseUrl: process.env.LLAMACPP_BASE_URL || "http://localhost:8080",
+  llamacppTextModel: process.env.LLAMACPP_TEXT_MODEL || "default",
+  piperBinaryPath: process.env.PIPER_BINARY_PATH || "piper",
+  piperModelPath: process.env.PIPER_MODEL_PATH || "",
+  geminiApiKey: process.env.GEMINI_API_KEY || "",
+  openaiApiKey: process.env.OPENAI_API_KEY || "",
+};
+
+let activeTextProvider: TextProvider | null = null;
+let activeTTSProvider: TTSProvider | null = null;
+
+function loadProviders() {
+  activeTextProvider = createTextProvider({
+    provider: currentConfig.textProvider,
+    geminiApiKey: currentConfig.geminiApiKey,
+    geminiModel: currentConfig.geminiTextModel,
+    openaiApiKey: currentConfig.openaiApiKey,
+    openaiBaseUrl: currentConfig.openaiBaseUrl,
+    openaiModel: currentConfig.openaiTextModel,
+    ollamaBaseUrl: currentConfig.ollamaBaseUrl,
+    ollamaModel: currentConfig.ollamaTextModel,
+    llamacppBaseUrl: currentConfig.llamacppBaseUrl,
+    llamacppModel: currentConfig.llamacppTextModel,
+  });
+
+  activeTTSProvider = createTTSProvider({
+    provider: currentConfig.ttsProvider,
+    geminiApiKey: currentConfig.geminiApiKey,
+    geminiTtsModel: currentConfig.geminiTtsModel,
+    openaiApiKey: currentConfig.openaiApiKey,
+    openaiBaseUrl: currentConfig.openaiBaseUrl,
+    openaiTtsModel: currentConfig.openaiTtsModel,
+    openaiTtsVoice: currentConfig.openaiTtsVoice,
+    piperBinaryPath: currentConfig.piperBinaryPath,
+    piperModelPath: currentConfig.piperModelPath,
+  });
+}
+
+function getPublicConfig() {
+  return {
+    textProvider: currentConfig.textProvider,
+    ttsProvider: currentConfig.ttsProvider,
+    geminiTextModel: currentConfig.geminiTextModel,
+    geminiTtsModel: currentConfig.geminiTtsModel,
+    openaiTextModel: currentConfig.openaiTextModel,
+    openaiBaseUrl: currentConfig.openaiBaseUrl,
+    openaiTtsModel: currentConfig.openaiTtsModel,
+    openaiTtsVoice: currentConfig.openaiTtsVoice,
+    ollamaBaseUrl: currentConfig.ollamaBaseUrl,
+    ollamaTextModel: currentConfig.ollamaTextModel,
+    llamacppBaseUrl: currentConfig.llamacppBaseUrl,
+    llamacppTextModel: currentConfig.llamacppTextModel,
+    piperBinaryPath: currentConfig.piperBinaryPath,
+    piperModelPath: currentConfig.piperModelPath,
+    hasGeminiKey: !!currentConfig.geminiApiKey,
+    hasOpenaiKey: !!currentConfig.openaiApiKey,
+  };
+}
+
+function updateConfig(updates: Partial<AppConfig>) {
+  Object.assign(currentConfig, updates);
+  loadProviders();
+}
+
+// Initial load & validation
+try {
+  loadProviders();
+} catch (err) {
+  console.error("Provider initialization failed:", err);
+  process.exit(1);
+}
+
+// ─── API Routes ─────────────────────────────────────────────────────────
 
 app.use(express.json({ limit: "10mb" }));
 
-// ─── Existing CRUD Routes ───────────────────────────────────────────────
-
 app.get("/api/subtitles", (req, res) => {
-  const rows = db.prepare("SELECT * FROM subtitles ORDER BY created_at DESC").all();
-  res.json(rows);
+  try {
+    const data = db.getSubtitles();
+    res.json({ data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch subtitles" });
+  }
 });
 
-app.post("/api/subtitles/upload", upload.single("subtitle"), async (req: any, res) => {
-  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+app.post("/api/subtitles/upload", upload.single("subtitle"), async (req: Request, res: Response) => {
+  try {
+    const multerReq = req as Request & { file?: { buffer: Buffer; originalname: string } };
+    if (!multerReq.file) return res.status(400).json({ error: "No file uploaded" });
 
-  const content = fs.readFileSync(req.file.path, "utf-8");
-  const filename = req.file.originalname;
+    const content = multerReq.file.buffer.toString("utf-8");
+    const filename = multerReq.file.originalname;
 
-  const info = db.prepare("INSERT INTO subtitles (filename, content) VALUES (?, ?)").run(filename, content);
-  const subtitleId = info.lastInsertRowid;
-
-  fs.unlinkSync(req.file.path);
-  res.json({ id: subtitleId, filename });
+    const subtitleId = db.insertSubtitle(filename, content);
+    res.status(201).json({ data: { id: subtitleId, filename } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to upload subtitle" });
+  }
 });
 
 app.get("/api/subtitles/:id", (req, res) => {
-  const { id } = req.params;
-  const subtitle = db.prepare("SELECT * FROM subtitles WHERE id = ?").get(id);
-  if (!subtitle) return res.status(404).json({ error: "Subtitle not found" });
-  res.json(subtitle);
+  try {
+    const subtitle = db.getSubtitleById(parseInt(req.params.id));
+    if (!subtitle) return res.status(404).json({ error: "Subtitle not found" });
+    res.json({ data: subtitle });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch subtitle" });
+  }
 });
 
 app.post("/api/save-items", async (req, res) => {
-  const { subtitleId, items } = req.body;
-
   try {
-    const insert = db.prepare(`
-      INSERT INTO extracted_items (
-        subtitle_id, type, term, meaning_en, meaning_zh, phonetic, 
-        part_of_speech, usage_scenarios_en, usage_scenarios_zh, 
-        examples_en, examples_zh, synonyms, frequency, level
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const transaction = db.transaction((items) => {
-      for (const item of items) {
-        insert.run(
-          subtitleId,
-          item.type,
-          item.term,
-          item.meaning_en,
-          item.meaning_zh,
-          item.phonetic || "",
-          item.part_of_speech || "",
-          item.usage_scenarios_en || "",
-          item.usage_scenarios_zh || "",
-          item.examples_en || "",
-          item.examples_zh || "",
-          item.synonyms || "",
-          item.frequency || "",
-          item.level || "B1"
-        );
-      }
-    });
-
-    transaction(items);
-    res.json({ success: true, count: items.length });
-  } catch (error) {
-    console.error("Save Items Error:", error);
+    const { subtitleId, items } = req.body;
+    db.bulkInsertItems(subtitleId, items);
+    res.json({ data: { success: true, count: items.length } });
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Failed to save items" });
   }
 });
 
 app.get("/api/items/:subtitleId", (req, res) => {
-  const { subtitleId } = req.params;
-  const { levels } = req.query;
-  
-  let query = "SELECT * FROM extracted_items WHERE subtitle_id = ?";
-  const params: any[] = [subtitleId];
-  
-  if (levels) {
-    const levelList = Array.isArray(levels) ? levels : (levels as string).split(",");
-    const placeholders = levelList.map(() => "?").join(",");
-    query += ` AND level IN (${placeholders})`;
-    params.push(...levelList);
+  try {
+    const levels = req.query.levels as string | undefined;
+    const levelList = levels ? levels.split(",") : undefined;
+    const data = db.getItemsBySubtitleId(parseInt(req.params.subtitleId), levelList);
+    res.json({ data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch items" });
   }
-  
-  const rows = db.prepare(query).all(...params);
-  res.json(rows);
 });
 
 app.delete("/api/subtitles/:id", (req, res) => {
-  const { id } = req.params;
   try {
-    db.prepare("DELETE FROM extracted_items WHERE subtitle_id = ?").run(id);
-    db.prepare("DELETE FROM subtitles WHERE id = ?").run(id);
-    res.json({ success: true });
-  } catch (error) {
-    console.error("Delete Subtitle Error:", error);
+    db.deleteSubtitle(parseInt(req.params.id));
+    res.json({ data: { success: true } });
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Failed to delete subtitle" });
   }
 });
 
-// ─── NEW: AI Provider Routes ────────────────────────────────────────────
-
-/**
- * POST /api/analyze
- * Analyze a subtitle using the configured text LLM provider.
- * Body: { subtitleId: number }
- */
-app.post("/api/analyze", async (req, res) => {
-  const { subtitleId } = req.body;
-  if (!subtitleId) return res.status(400).json({ error: "subtitleId is required" });
-
+app.post("/api/analyze", async (req: Request, res: Response) => {
   try {
-    // 1. Fetch subtitle content
-    const subtitle = db.prepare("SELECT * FROM subtitles WHERE id = ?").get(subtitleId) as any;
+    const { subtitleId } = req.body;
+    if (!subtitleId) return res.status(400).json({ error: "subtitleId is required" });
+
+    const subtitle = db.getSubtitleById(parseInt(subtitleId));
     if (!subtitle) return res.status(404).json({ error: "Subtitle not found" });
 
-    // 2. Parse SRT
     const parser = new SrtParser();
     const parsed = parser.fromSrt(subtitle.content);
-    const rawText = parsed.map((p: any) => p.text).join(" ").slice(0, 40000);
+    const rawText = parsed.map((p: { text: string }) => p.text).join(" ").slice(0, 40000);
 
-    // 3. Call configured text provider
-    const provider = getTextProvider();
-    console.log(`[Analyze] Using text provider: ${provider.name}`);
-    const extractedItems = await provider.analyze(rawText);
+    if (!activeTextProvider) throw new Error("Provider not initialized");
+    const extractedItems = await activeTextProvider.analyze(rawText);
 
-    // 4. Save items to DB
-    const insert = db.prepare(`
-      INSERT INTO extracted_items (
-        subtitle_id, type, term, meaning_en, meaning_zh, phonetic,
-        part_of_speech, usage_scenarios_en, usage_scenarios_zh,
-        examples_en, examples_zh, synonyms, frequency, level
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const transaction = db.transaction((items: any[]) => {
-      for (const item of items) {
-        insert.run(
-          subtitleId,
-          item.type,
-          item.term,
-          item.meaning_en,
-          item.meaning_zh,
-          item.phonetic || "",
-          item.part_of_speech || "",
-          item.usage_scenarios_en || "",
-          item.usage_scenarios_zh || "",
-          item.examples_en || "",
-          item.examples_zh || "",
-          item.synonyms || "",
-          item.frequency || "",
-          item.level || "B1"
-        );
-      }
-    });
-
-    transaction(extractedItems);
-    res.json({ success: true, count: extractedItems.length, provider: provider.name });
-  } catch (error: any) {
-    console.error("Analyze Error:", error);
-    res.status(500).json({ error: `Analysis failed: ${error.message}` });
+    db.bulkInsertItems(parseInt(subtitleId), extractedItems);
+    res.json({ data: { success: true, count: extractedItems.length } });
+  } catch (err) {
+    console.error("Analyze Error:", err);
+    res.status(500).json({ error: `Analysis failed: ${err instanceof Error ? err.message : String(err)}` });
   }
 });
 
-/**
- * POST /api/tts
- * Generate speech audio using the configured TTS provider.
- * Body: { text: string, voice: string }
- * Returns: WAV audio binary
- */
-app.post("/api/tts", async (req, res) => {
-  const { text, voice } = req.body;
-  if (!text) return res.status(400).json({ error: "text is required" });
-
+app.post("/api/tts", async (req: Request, res: Response) => {
   try {
-    const provider = getTTSProvider();
-    console.log(`[TTS] Using TTS provider: ${provider.name}`);
-    const wavBuffer = await provider.synthesize(text, voice || "American");
+    const { text, voice } = req.body;
+    if (!text) return res.status(400).json({ error: "text is required" });
 
-    res.set({
-      "Content-Type": "audio/wav",
-      "Content-Length": String(wavBuffer.length),
-    });
+    if (!activeTTSProvider) throw new Error("Provider not initialized");
+    const wavBuffer = await activeTTSProvider.synthesize(text, voice || "american");
+
+    res.set({ "Content-Type": "audio/wav", "Content-Length": String(wavBuffer.length) });
     res.send(wavBuffer);
-  } catch (error: any) {
-    console.error("TTS Error:", error);
-    res.status(500).json({ error: `TTS failed: ${error.message}` });
+  } catch (err) {
+    console.error("TTS Error:", err);
+    res.status(500).json({ error: `TTS failed: ${err instanceof Error ? err.message : String(err)}` });
   }
 });
 
-/**
- * GET /api/config
- * Returns the current provider configuration (no API keys).
- */
-app.get("/api/config", (req, res) => {
+app.get("/api/config", (req: Request, res: Response) => {
   res.json(getPublicConfig());
 });
 
-/**
- * POST /api/config
- * Update provider configuration at runtime.
- * Body: Partial<AppConfig> (e.g. { textProvider: "ollama" })
- */
-app.post("/api/config", (req, res) => {
+app.post("/api/config", (req: Request, res: Response) => {
   try {
     updateConfig(req.body);
-    res.json({ success: true, config: getPublicConfig() });
-  } catch (error: any) {
-    console.error("Config Update Error:", error);
-    res.status(500).json({ error: `Config update failed: ${error.message}` });
+    res.json({ config: getPublicConfig() });
+  } catch (err) {
+    console.error("Config Update Error:", err);
+    res.status(500).json({ error: `Config update failed: ${err instanceof Error ? err.message : String(err)}` });
   }
 });
 
-// ─── Vite middleware for development ────────────────────────────────────
+// ─── Vite middleware ────────────────────────────────────────────────────
 
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
