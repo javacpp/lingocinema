@@ -271,8 +271,8 @@ Each implementation file (`gemini.ts`, `openai.ts`, `piper.ts`, etc.) exports a 
 
 | Provider | Env var | Default model |
 |---|---|---|
-| Gemini text | `GEMINI_TEXT_MODEL` | `gemini-3-flash-preview` |
-| Gemini TTS | `GEMINI_TTS_MODEL` | `gemini-2.5-flash-preview-tts` |
+| Gemini text | `GEMINI_TEXT_MODEL` | `gemini-3.8-flash` |
+| Gemini TTS | `GEMINI_TTS_MODEL` | `gemini-3.1-flash-tts-preview` |
 | OpenAI text | `OPENAI_TEXT_MODEL` | `gpt-4o` |
 | OpenAI TTS | `OPENAI_TTS_MODEL` | `tts-1` |
 | Ollama text | `OLLAMA_TEXT_MODEL` | `llama3` |
@@ -310,7 +310,9 @@ The config file is `.env.local` (copy from `.env.example`). **Never commit `.env
 |---|---|---|
 | `TEXT_PROVIDER` | `gemini` | Active provider: `gemini` / `openai` / `ollama` / `llamacpp` |
 | `GEMINI_API_KEY` | — | Google Gemini API key |
-| `GEMINI_TEXT_MODEL` | `gemini-3-flash-preview` | Gemini text model |
+| `GEMINI_TEXT_MODEL` | `gemini-3.8-flash` | Gemini text model |
+| `GEMINI_THINKING_LEVEL` | — | Optional thinking level: `MINIMAL`, `LOW`, `MEDIUM`, `HIGH` |
+| `GEMINI_MAX_OUTPUT_TOKENS` | `32768` | Maximum output tokens for Gemini generation (up to 65536) |
 | `OPENAI_API_KEY` | — | OpenAI API key |
 | `OPENAI_BASE_URL` | `https://api.openai.com` | OpenAI-compatible endpoint (override for custom hosts) |
 | `OPENAI_TEXT_MODEL` | `gpt-4o` | OpenAI text model |
@@ -324,7 +326,7 @@ The config file is `.env.local` (copy from `.env.example`). **Never commit `.env
 | Variable | Default | Description |
 |---|---|---|
 | `TTS_PROVIDER` | `gemini` | Active provider: `gemini` / `openai` / `piper` |
-| `GEMINI_TTS_MODEL` | `gemini-2.5-flash-preview-tts` | Gemini TTS model |
+| `GEMINI_TTS_MODEL` | `gemini-3.1-flash-tts-preview` | Gemini TTS model |
 | `OPENAI_TTS_MODEL` | `tts-1` | OpenAI TTS model |
 | `OPENAI_TTS_VOICE` | `alloy` | OpenAI TTS voice |
 | `PIPER_BINARY_PATH` | `piper` | Path to Piper executable |

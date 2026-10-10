@@ -51,6 +51,8 @@ type ProviderConfig = {
   textProvider: string;
   ttsProvider: string;
   geminiTextModel: string;
+  geminiThinkingLevel: string;
+  geminiMaxOutputTokens: number;
   geminiTtsModel: string;
   openaiTextModel: string;
   openaiBaseUrl: string;
@@ -94,7 +96,7 @@ function SettingsPanel({
 
   if (!isOpen || !config) return null;
 
-  const update = (key: string, value: string) => {
+  const update = (key: string, value: string | number) => {
     setLocalConfig(prev => ({ ...prev, [key]: value }));
   };
 
@@ -151,14 +153,43 @@ function SettingsPanel({
 
             {/* Provider-specific model config */}
             {localConfig.textProvider === 'gemini' && (
-              <div>
-                <label className="text-xs text-[#A8A29E] block mb-1">Model</label>
-                <input
-                  type="text"
-                  value={localConfig.geminiTextModel || ''}
-                  onChange={e => update('geminiTextModel', e.target.value)}
-                  className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
-                />
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-[#A8A29E] block mb-1">Model</label>
+                  <input
+                    type="text"
+                    value={localConfig.geminiTextModel || ''}
+                    onChange={e => update('geminiTextModel', e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-[#A8A29E] block mb-1">Thinking Level</label>
+                  <select
+                    value={localConfig.geminiThinkingLevel || ''}
+                    onChange={e => update('geminiThinkingLevel', e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5 text-[#1C1917]"
+                  >
+                    <option value="">Default (Model default)</option>
+                    <option value="MINIMAL">Minimal</option>
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-[#A8A29E] block mb-1">Max Output Tokens</label>
+                  <input
+                    type="number"
+                    value={localConfig.geminiMaxOutputTokens ?? 32768}
+                    onChange={e => update('geminiMaxOutputTokens', parseInt(e.target.value, 10) || 32768)}
+                    min={1024}
+                    max={65536}
+                    step={1024}
+                    className="w-full px-3 py-2 bg-[#F5F5F4] rounded-lg text-sm border-none focus:ring-2 focus:ring-black/5"
+                  />
+                  <span className="text-[10px] text-[#A8A29E] mt-0.5 block">Recommended: 32768–65536 for comprehensive word extraction</span>
+                </div>
               </div>
             )}
             {localConfig.textProvider === 'openai' && (

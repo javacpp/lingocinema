@@ -26,6 +26,8 @@ export type ProviderConfig = {
   textProvider: string;
   ttsProvider: string;
   geminiTextModel: string;
+  geminiThinkingLevel: string;
+  geminiMaxOutputTokens: number;
   geminiTtsModel: string;
   openaiTextModel: string;
   openaiBaseUrl: string;

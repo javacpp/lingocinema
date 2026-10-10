@@ -24,6 +24,8 @@ interface AppConfig {
   textProvider: string;
   ttsProvider: string;
   geminiTextModel: string;
+  geminiThinkingLevel: string;
+  geminiMaxOutputTokens: number;
   geminiTtsModel: string;
   openaiTextModel: string;
   openaiBaseUrl: string;
@@ -42,8 +44,10 @@ interface AppConfig {
 const currentConfig: AppConfig = {
   textProvider: process.env.TEXT_PROVIDER || "gemini",
   ttsProvider: process.env.TTS_PROVIDER || "gemini",
-  geminiTextModel: process.env.GEMINI_TEXT_MODEL || "gemini-3-flash-preview",
-  geminiTtsModel: process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts",
+  geminiTextModel: process.env.GEMINI_TEXT_MODEL || "gemini-3.8-flash",
+  geminiThinkingLevel: process.env.GEMINI_THINKING_LEVEL || "",
+  geminiMaxOutputTokens: parseInt(process.env.GEMINI_MAX_OUTPUT_TOKENS || "32768", 10) || 32768,
+  geminiTtsModel: process.env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview",
   openaiTextModel: process.env.OPENAI_TEXT_MODEL || "gpt-4o",
   openaiBaseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com",
   openaiTtsModel: process.env.OPENAI_TTS_MODEL || "tts-1",
@@ -66,6 +70,8 @@ function loadProviders() {
     provider: currentConfig.textProvider,
     geminiApiKey: currentConfig.geminiApiKey,
     geminiModel: currentConfig.geminiTextModel,
+    geminiThinkingLevel: currentConfig.geminiThinkingLevel,
+    geminiMaxOutputTokens: currentConfig.geminiMaxOutputTokens,
     openaiApiKey: currentConfig.openaiApiKey,
     openaiBaseUrl: currentConfig.openaiBaseUrl,
     openaiModel: currentConfig.openaiTextModel,
@@ -93,6 +99,8 @@ function getPublicConfig() {
     textProvider: currentConfig.textProvider,
     ttsProvider: currentConfig.ttsProvider,
     geminiTextModel: currentConfig.geminiTextModel,
+    geminiThinkingLevel: currentConfig.geminiThinkingLevel,
+    geminiMaxOutputTokens: currentConfig.geminiMaxOutputTokens,
     geminiTtsModel: currentConfig.geminiTtsModel,
     openaiTextModel: currentConfig.openaiTextModel,
     openaiBaseUrl: currentConfig.openaiBaseUrl,
@@ -110,6 +118,9 @@ function getPublicConfig() {
 }
 
 function updateConfig(updates: Partial<AppConfig>) {
+  if (updates.geminiMaxOutputTokens !== undefined) {
+    updates.geminiMaxOutputTokens = Number(updates.geminiMaxOutputTokens) || 32768;
+  }
   Object.assign(currentConfig, updates);
   loadProviders();
 }

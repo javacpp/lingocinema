@@ -10,3 +10,4 @@ coverage/
 *.db
 docs/
 .antigravitycli/
+*.srt

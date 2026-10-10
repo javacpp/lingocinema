@@ -6,6 +6,8 @@ export function createTextProvider(config: {
   provider: string;
   geminiApiKey?: string;
   geminiModel?: string;
+  geminiThinkingLevel?: string;
+  geminiMaxOutputTokens?: number;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   openaiModel?: string;
@@ -17,7 +19,7 @@ export function createTextProvider(config: {
   switch (config.provider) {
     case "gemini":
       if (!config.geminiApiKey) throw new Error("GEMINI_API_KEY is required for Gemini provider");
-      return new GeminiTextProvider(config.geminiApiKey, config.geminiModel);
+      return new GeminiTextProvider(config.geminiApiKey, config.geminiModel, config.geminiThinkingLevel, config.geminiMaxOutputTokens);
 
     case "openai":
       return new OpenAICompatibleTextProvider(

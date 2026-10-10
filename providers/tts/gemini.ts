@@ -24,7 +24,7 @@ export class GeminiTTSProvider implements TTSProvider {
   private apiKey: string;
   private model: string;
 
-  constructor(apiKey: string, model: string = "gemini-2.5-flash-preview-tts") {
+  constructor(apiKey: string, model: string = "gemini-3.1-flash-tts-preview") {
     this.apiKey = apiKey;
     this.model = model;
   }
