@@ -70,6 +70,8 @@ export class SQLiteDatabase implements IDatabase {
       params.push(...levels);
     }
 
+    query += ' ORDER BY id ASC';
+
     return this.db.prepare(query).all(...params) as ExtractedItem[];
   }
 
