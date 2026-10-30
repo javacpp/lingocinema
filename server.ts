@@ -217,7 +217,18 @@ app.post("/api/analyze", async (req: Request, res: Response) => {
 
     const parser = new SrtParser();
     const parsed = parser.fromSrt(subtitle.content);
-    const rawText = parsed.map((p: { text: string }) => p.text).join(" ").slice(0, 40000);
+
+    let header = "";
+    if (parsed.length > 0) {
+      const lastCue = parsed[parsed.length - 1];
+      const runtimeStr = lastCue?.endTime || "";
+      header = `[SUBTITLE CONTEXT: cues=${parsed.length}${runtimeStr ? `, duration=${runtimeStr}` : ""}]\n\n`;
+    }
+
+    const dialogueLines = parsed.length > 0 
+      ? parsed.map((p: { text: string }) => p.text).join(" ") 
+      : subtitle.content;
+    const rawText = header + dialogueLines;
 
     if (!activeTextProvider) throw new Error("Provider not initialized");
     const extractedItems = await activeTextProvider.analyze(rawText);

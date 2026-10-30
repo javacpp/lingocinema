@@ -14,15 +14,48 @@ function resolveThinkingLevel(level?: string): ThinkingLevel | undefined {
   return undefined;
 }
 
-const ANALYSIS_PROMPT = (rawText: string) => `
+export function estimateExtractionTarget(text: string): { durationMinutes: number; minTarget: number; maxTarget: number } {
+  const metaMatch = text.match(/\[SUBTITLE CONTEXT: cues=(\d+)(?:, duration=([\d:,]+))?\]/);
+  let durationMinutes = 0;
+  if (metaMatch && metaMatch[2]) {
+    const parts = metaMatch[2].split(':');
+    if (parts.length >= 2) {
+      const hours = parseInt(parts[0], 10) || 0;
+      const mins = parseInt(parts[1], 10) || 0;
+      durationMinutes = hours * 60 + mins;
+    }
+  }
+
+  if (durationMinutes === 0) {
+    // Fallback: estimate runtime based on character length (~650-700 characters per minute)
+    durationMinutes = Math.max(30, Math.round(text.length / 700));
+  }
+
+  // Scale: 80 to 100+ items per 45 minutes of content
+  const factor = durationMinutes / 45;
+  const minTarget = Math.max(80, Math.round(factor * 80));
+  const maxTarget = Math.max(100, Math.round(factor * 100));
+
+  return { durationMinutes, minTarget, maxTarget };
+}
+
+const ANALYSIS_PROMPT = (rawText: string) => {
+  const { durationMinutes, minTarget, maxTarget } = estimateExtractionTarget(rawText);
+
+  return `
 Role: You are an expert English linguist, advanced ESL/EFL instructor, and pronunciation coach. Your target student is a non-native English speaker (specifically a native Chinese speaker) currently at a B1-B2 CEFR level, aiming to reach C1-C2.
 
 Objective: Analyze the provided movie/TV show subtitle text transcript. Extract a comprehensive, exhaustive list of advanced vocabulary, idioms, expressions, phrasal verbs, collocations, and stage directions/sound effects that are valuable for language learners.
 
 CRITICAL EXTRACTION DIRECTIVES (QUANTITY & EXHAUSTIVENESS):
 1. CHRONOLOGICAL SCANNING: Scan the text chronologically from the first dialogue line to the very end of the transcript. Extract items in the exact order they appear in the dialogue.
-2. BE EXHAUSTIVE — DO NOT SAMPLE: A typical TV episode or movie contains between 60 and 100+ advanced words, idioms, collocations, and phrasal verbs. You MUST extract ALL qualifying items across the entire transcript. STRICTLY DO NOT stop after 20, 25, or 30 words. DO NOT return a small sample or single example. Your response should contain at least 60 to 100+ items.
-3. CONCISE FIELD DESCRIPTIONS: To ensure all 60–100+ items fit cleanly in the JSON response, keep definitions and examples concise:
+2. DYNAMIC EXTRACTION VOLUME SCALED TO RUNTIME / LENGTH:
+   The quantity of extracted items MUST be proportional to the length and running time of the movie or show:
+   - For a standard ~45-minute TV episode (approx. 700–1,000 cues or ~30,000 characters): You MUST extract between 80 and 100+ qualifying items.
+   - For a feature-length ~90 to 120-minute movie (approx. 1,500–2,500 cues or ~70,000–100,000 characters): You MUST extract between 160 and 220+ qualifying items.
+   - Current transcript estimate: ~${durationMinutes} minutes duration. Your extraction target for this transcript is at least ${minTarget} to ${maxTarget}+ items.
+   - UNIFORM DENSITY & ANTI-SAMPLING: STRICTLY DO NOT stop after 20 or 30 words. DO NOT return a small sample. Maintain consistent extraction density across the entire duration—do NOT downsample or lose momentum in the second half of the movie or show.
+3. CONCISE FIELD DESCRIPTIONS: To ensure all extracted items fit cleanly in the JSON response, keep definitions and examples concise:
    - "meaning_en" & "meaning_zh": 1 brief, precise definition or phrase.
    - "usage_scenarios_en" & "usage_scenarios_zh": Brief scenario tag (e.g., "Daily British spoken conversation" / "母语者日常口语").
    - "examples_en" & "examples_zh": 1 concise illustrative sentence.
@@ -63,6 +96,7 @@ You MUST respond with a JSON array containing ALL extracted items. Each element 
 Text:
 ${rawText}
 `;
+};
 
 function extractIndividualObjects(text: string): Record<string, unknown>[] {
   const results: Record<string, unknown>[] = [];
