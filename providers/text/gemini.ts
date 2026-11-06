@@ -1,5 +1,27 @@
 import { NewExtractedItem } from '../../db/interface.js';
-import { TextProvider } from './interface.js';
+import type {
+  NewListeningDifficulty,
+  NewListeningExample,
+} from '../../src/types/listening.js';
+import {
+  parseAndRepairJsonArray,
+  validateExampleBatch,
+  validateListeningExtractResponse,
+} from '../../src/lib/listeningValidator.js';
+import {
+  AudioVerificationInput,
+  AudioVerificationResult,
+  ExampleGenerationRequest,
+  TextProvider,
+} from './interface.js';
+import {
+  AUDIO_VERIFY_PROMPT,
+  AUDIO_VERIFY_RESPONSE_SCHEMA,
+  EXAMPLE_GEN_PROMPT,
+  EXAMPLE_GEN_RESPONSE_SCHEMA,
+  LISTENING_ANALYSIS_PROMPT,
+  LISTENING_ANALYSIS_RESPONSE_SCHEMA,
+} from './listeningPrompt.js';
 import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 
 function resolveThinkingLevel(level?: string): ThinkingLevel | undefined {
@@ -288,5 +310,129 @@ export class GeminiTextProvider implements TextProvider {
     }
 
     return validItems;
+  }
+
+  async analyzeListening(formattedCuesText: string): Promise<NewListeningDifficulty[]> {
+    const ai = new GoogleGenAI({ apiKey: this.apiKey });
+    const resolvedLevel = resolveThinkingLevel(this.thinkingLevel);
+    const response = await ai.models.generateContent({
+      model: this.model,
+      contents: LISTENING_ANALYSIS_PROMPT(formattedCuesText),
+      config: {
+        responseMimeType: "application/json",
+        ...(this.maxOutputTokens ? { maxOutputTokens: this.maxOutputTokens } : {}),
+        ...(resolvedLevel ? { thinkingConfig: { thinkingLevel: resolvedLevel } } : {}),
+        responseSchema: LISTENING_ANALYSIS_RESPONSE_SCHEMA,
+      },
+    });
+
+    const content = response.text || "";
+    const parsedArray = parseAndRepairJsonArray(content);
+    const validated = validateListeningExtractResponse(parsedArray);
+
+    if (validated.length === 0) {
+      console.error("AI returned unparseable listening content. Preview:", content.slice(0, 500));
+      throw new Error("AI returned unparseable response");
+    }
+
+    return validated;
+  }
+
+  async generateListeningExamples(req: ExampleGenerationRequest): Promise<NewListeningExample[]> {
+    const ai = new GoogleGenAI({ apiKey: this.apiKey });
+    const resolvedLevel = resolveThinkingLevel(this.thinkingLevel);
+
+    const invokeOnce = async (currentReq: ExampleGenerationRequest): Promise<unknown[]> => {
+      const response = await ai.models.generateContent({
+        model: this.model,
+        contents: EXAMPLE_GEN_PROMPT(currentReq),
+        config: {
+          responseMimeType: "application/json",
+          ...(this.maxOutputTokens ? { maxOutputTokens: this.maxOutputTokens } : {}),
+          ...(resolvedLevel ? { thinkingConfig: { thinkingLevel: resolvedLevel } } : {}),
+          responseSchema: EXAMPLE_GEN_RESPONSE_SCHEMA,
+        },
+      });
+      return parseAndRepairJsonArray(response.text || "");
+    };
+
+    const target = {
+      category: req.category,
+      phrase: req.phrase,
+      spokenPhrase: req.spokenPhrase,
+      simulatedPronunciation: req.simulatedPronunciation,
+    };
+
+    const firstRaw = await invokeOnce(req);
+    const firstValidation = validateExampleBatch(firstRaw, target);
+    if (firstValidation.valid || req.validationFeedback) {
+      return firstValidation.items;
+    }
+
+    const retryRaw = await invokeOnce({
+      ...req,
+      validationFeedback: firstValidation.feedback,
+    });
+    const retryValidation = validateExampleBatch(retryRaw, target);
+    if (retryValidation.items.length >= firstValidation.items.length) {
+      return retryValidation.items;
+    }
+    return firstValidation.items;
+  }
+
+  async verifyConnectedSpeechAudio(
+    wavBuffer: Buffer,
+    input: AudioVerificationInput
+  ): Promise<AudioVerificationResult> {
+    const ai = new GoogleGenAI({ apiKey: this.apiKey });
+    const response = await ai.models.generateContent({
+      model: this.model,
+      contents: [
+        {
+          inlineData: {
+            mimeType: "audio/wav",
+            data: wavBuffer.toString("base64"),
+          },
+        },
+        {
+          text: AUDIO_VERIFY_PROMPT(input),
+        },
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: AUDIO_VERIFY_RESPONSE_SCHEMA,
+      },
+    });
+
+    const rawText = (response.text || "")
+      .replace(/<think>[\s\S]*?<\/think>/gi, "")
+      .replace(/```(?:json)?/gi, "")
+      .replace(/```/g, "")
+      .trim();
+
+    try {
+      const parsed = JSON.parse(rawText) as {
+        heardPhrase?: unknown;
+        exhibitsReduction?: unknown;
+        confidence?: unknown;
+        note?: unknown;
+      };
+      const exhibitsReduction = Boolean(parsed.exhibitsReduction);
+      const note =
+        typeof parsed.note === "string" && parsed.note.trim().length > 0
+          ? parsed.note.trim()
+          : exhibitsReduction
+            ? `Verified reduction (${String(parsed.heardPhrase || input.simulatedPronunciation)})`
+            : "Reduction not clearly detected in audio clip.";
+      return {
+        status: exhibitsReduction ? "verified" : "failed_check",
+        note,
+      };
+    } catch {
+      return {
+        status: "failed_check",
+        note: "Could not parse audio verification response from model.",
+      };
+    }
   }
 }

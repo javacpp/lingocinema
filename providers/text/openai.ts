@@ -1,5 +1,15 @@
 import { NewExtractedItem } from '../../db/interface.js';
-import { TextProvider } from './interface.js';
+import type {
+  NewListeningDifficulty,
+  NewListeningExample,
+} from '../../src/types/listening.js';
+import {
+  parseAndRepairJsonArray,
+  validateExampleBatch,
+  validateListeningExtractResponse,
+} from '../../src/lib/listeningValidator.js';
+import { ExampleGenerationRequest, TextProvider } from './interface.js';
+import { EXAMPLE_GEN_PROMPT, LISTENING_ANALYSIS_PROMPT } from './listeningPrompt.js';
 
 const LOCAL_ANALYSIS_PROMPT = (rawText: string) => `You are a vocabulary extractor. Extract ALL interesting English words, idioms, slang, and phrases from the subtitle text below.
 
@@ -205,5 +215,106 @@ export class OpenAICompatibleTextProvider implements TextProvider {
         frequency: String(item['frequency'] || "Medium"),
         level: String(item['level'] || "B1"),
       }));
+  }
+
+  private async callChatCompletion(userPrompt: string, systemPrompt: string): Promise<string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.apiKey) {
+      headers["Authorization"] = `Bearer ${this.apiKey}`;
+    }
+
+    const isLocalProvider = this.name === "llamacpp" || this.name === "ollama";
+
+    const body: Record<string, unknown> = {
+      model: this.model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.3,
+    };
+
+    if (isLocalProvider) {
+      body.max_tokens = 16384;
+    } else {
+      body.response_format = { type: "json_object" };
+    }
+
+    const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`${this.name} API error ${res.status}: ${errText}`);
+    }
+
+    const data = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    return data.choices?.[0]?.message?.content ?? "";
+  }
+
+  async analyzeListening(formattedCuesText: string): Promise<NewListeningDifficulty[]> {
+    const isLocalProvider = this.name === "llamacpp" || this.name === "ollama";
+    const systemPrompt = isLocalProvider
+      ? "You are a JSON API. You extract English listening difficulties from subtitle cues. You ONLY output valid JSON arrays. Never output explanations or markdown."
+      : 'You are an expert English phonetics coach. Respond with valid JSON only (either a JSON array or { "items": [...] }). No markdown, no backticks.';
+
+    const inputText = isLocalProvider ? formattedCuesText.slice(0, 12000) : formattedCuesText;
+    const prompt = LISTENING_ANALYSIS_PROMPT(inputText);
+
+    const firstContent = await this.callChatCompletion(prompt, systemPrompt);
+    let validated = validateListeningExtractResponse(parseAndRepairJsonArray(firstContent));
+
+    if (validated.length === 0 && isLocalProvider) {
+      const retryContent = await this.callChatCompletion(prompt, systemPrompt);
+      validated = validateListeningExtractResponse(parseAndRepairJsonArray(retryContent));
+    }
+
+    if (validated.length === 0) {
+      throw new Error("AI returned unparseable response");
+    }
+
+    return validated;
+  }
+
+  async generateListeningExamples(req: ExampleGenerationRequest): Promise<NewListeningExample[]> {
+    const isLocalProvider = this.name === "llamacpp" || this.name === "ollama";
+    const systemPrompt = isLocalProvider
+      ? "You are a JSON API. Output ONLY a valid JSON array of 3 example sentence objects. Never output markdown or commentary."
+      : 'You are an English phonetics curriculum writer. Respond with valid JSON only (a JSON array or { "examples": [...] }). No markdown fences.';
+
+    const target = {
+      category: req.category,
+      phrase: req.phrase,
+      spokenPhrase: req.spokenPhrase,
+      simulatedPronunciation: req.simulatedPronunciation,
+    };
+
+    const firstContent = await this.callChatCompletion(EXAMPLE_GEN_PROMPT(req), systemPrompt);
+    const firstValidation = validateExampleBatch(parseAndRepairJsonArray(firstContent), target);
+
+    if (firstValidation.valid || req.validationFeedback) {
+      return firstValidation.items;
+    }
+
+    const retryContent = await this.callChatCompletion(
+      EXAMPLE_GEN_PROMPT({
+        ...req,
+        validationFeedback: firstValidation.feedback,
+      }),
+      systemPrompt
+    );
+    const retryValidation = validateExampleBatch(parseAndRepairJsonArray(retryContent), target);
+
+    if (retryValidation.items.length >= firstValidation.items.length) {
+      return retryValidation.items;
+    }
+    return firstValidation.items;
   }
 }

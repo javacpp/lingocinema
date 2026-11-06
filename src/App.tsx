@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Upload, 
   FileText, 
@@ -16,7 +16,9 @@ import {
   Settings,
   X,
   Clock,
-  ArrowDownWideNarrow
+  ArrowDownWideNarrow,
+  Headphones,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -28,6 +30,14 @@ import {
   getItemTier, 
   TIER_DEFINITIONS 
 } from './lib/sorting.js';
+import { ListeningView } from './components/listening/ListeningView.js';
+import {
+  analyzeSubtitleListening,
+  clearTTSCache,
+  fetchListeningDifficulties,
+  fetchTTSCacheStats,
+} from './api/listening.js';
+import type { TTSCacheStats } from './types/listening.js';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -93,6 +103,50 @@ function SettingsPanel({
   onSave: (updates: Partial<ProviderConfig>) => void;
 }) {
   const [localConfig, setLocalConfig] = useState<Partial<ProviderConfig>>(() => config || {});
+  const [cacheStats, setCacheStats] = useState<TTSCacheStats | null>(null);
+  const [isLoadingCache, setIsLoadingCache] = useState(false);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+  const [cacheError, setCacheError] = useState<string | null>(null);
+
+  const loadCacheStats = useCallback(async () => {
+    setIsLoadingCache(true);
+    setCacheError(null);
+    try {
+      const stats = await fetchTTSCacheStats();
+      setCacheStats(stats);
+    } catch (err) {
+      setCacheError(err instanceof Error ? err.message : 'Failed to load cache stats');
+    } finally {
+      setIsLoadingCache(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let isCancelled = false;
+    const timer = setTimeout(() => {
+      if (!isCancelled) {
+        void loadCacheStats();
+      }
+    }, 0);
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isOpen, loadCacheStats]);
+
+  const handleClearCache = async () => {
+    setIsClearingCache(true);
+    setCacheError(null);
+    try {
+      await clearTTSCache();
+      await loadCacheStats();
+    } catch (err) {
+      setCacheError(err instanceof Error ? err.message : 'Failed to clear audio cache');
+    } finally {
+      setIsClearingCache(false);
+    }
+  };
 
   useEffect(() => {
     if (config) {
@@ -334,6 +388,88 @@ function SettingsPanel({
               </div>
             )}
           </section>
+
+          {/* TTS Audio Cache Management */}
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#78716C]">
+                TTS Audio Cache
+              </h3>
+              <button
+                type="button"
+                onClick={() => void loadCacheStats()}
+                disabled={isLoadingCache}
+                className="text-xs text-[#78716C] hover:text-black flex items-center gap-1 font-semibold disabled:opacity-50"
+                title="Refresh Cache Stats"
+              >
+                <RefreshCw className={cn('w-3 h-3', isLoadingCache && 'animate-spin')} />
+                Refresh
+              </button>
+            </div>
+
+            {cacheError && (
+              <div className="p-3 bg-red-50 text-red-700 rounded-xl text-xs mb-3">
+                {cacheError}
+              </div>
+            )}
+
+            <div className="bg-[#F5F5F4] rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-[#78716C]">Cached Audio Clips:</span>
+                <span className="font-bold font-mono text-[#1C1917]">
+                  {cacheStats ? `${cacheStats.entryCount} clips` : 'Loading...'}
+                </span>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[#78716C]">Disk Usage:</span>
+                  <span className="font-bold font-mono text-[#1C1917]">
+                    {cacheStats
+                      ? `${(cacheStats.totalBytes / (1024 * 1024)).toFixed(1)} MB / 200 MB`
+                      : '...'}
+                  </span>
+                </div>
+                <div className="w-full bg-[#E7E5E4] rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-black h-1.5 rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        ((cacheStats?.totalBytes ?? 0) / (200 * 1024 * 1024)) * 100
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-[#78716C]">Today&apos;s Synthesized Clips:</span>
+                <span className="font-bold font-mono text-[#1C1917]">
+                  {cacheStats ? `${cacheStats.todaySynthesizedCount} clips today` : '...'}
+                </span>
+              </div>
+
+              <div className="pt-2 border-t border-[#E7E5E4] flex items-center justify-between">
+                <span className="text-[11px] text-[#A8A29E]">
+                  Storage path: <code className="font-mono">.cache/tts/</code>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleClearCache}
+                  disabled={isClearingCache || !cacheStats || cacheStats.entryCount === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-red-600 hover:bg-red-50 border border-red-200 transition-all disabled:opacity-40"
+                >
+                  {isClearingCache ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-3 h-3" />
+                  )}
+                  Clear Audio Cache
+                </button>
+              </div>
+            </div>
+          </section>
         </div>
 
         <div className="p-6 border-t border-[#E7E5E4] flex justify-end gap-3">
@@ -363,6 +499,7 @@ export default function App() {
   const [items, setItems] = useState<ExtractedItem[]>([]);
   const [selectedLevels, setSelectedLevels] = useState<string[]>(['B1', 'B2', 'C1']);
   const [orderMode, setOrderMode] = useState<OrderMode>('chronological');
+  const [viewMode, setViewMode] = useState<'vocabulary' | 'listening'>('vocabulary');
   const [isUploading, setIsUploading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -370,7 +507,23 @@ export default function App() {
   const [isPlayingAudio, setIsPlayingAudio] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [providerConfig, setProviderConfig] = useState<ProviderConfig | null>(null);
+  const [listeningCount, setListeningCount] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (selectedSubtitle) {
+      void fetchListeningDifficulties(selectedSubtitle.id)
+        .then((res) => {
+          setTimeout(() => setListeningCount(res.items.length), 0);
+        })
+        .catch(() => {
+          setTimeout(() => setListeningCount(0), 0);
+        });
+    } else {
+      const timer = setTimeout(() => setListeningCount(0), 0);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedSubtitle]);
 
   const fetchSubtitles = async () => {
     try {
@@ -521,6 +674,14 @@ export default function App() {
       const result = (await res.json()).data;
       console.log(`Analysis complete: ${result.count} items extracted`);
       await fetchItems(selectedSubtitle.id, selectedLevels);
+
+      // Part 2 Auto-Chaining: Extract listening traps in background
+      try {
+        const listeningResult = await analyzeSubtitleListening(selectedSubtitle.id, { force: false });
+        setListeningCount(listeningResult.itemCount);
+      } catch (listeningErr) {
+        console.warn('Part 2 listening auto-chain failed:', listeningErr);
+      }
     } catch (err) {
       console.error('Processing failed', err);
       alert(`AI Processing failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -710,87 +871,132 @@ export default function App() {
             {/* Header */}
             <header className="h-20 border-b border-[#E7E5E4] bg-white flex items-center justify-between px-8">
               <div className="flex flex-col gap-1.5">
-                <h2 className="text-sm font-semibold truncate max-w-[320px]">{selectedSubtitle.filename}</h2>
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-bold text-[#A8A29E] uppercase tracking-wider">Levels:</span>
-                    <div className="flex gap-1">
-                      {LEVELS.map(l => (
+                  <h2 className="text-sm font-semibold truncate max-w-[320px]">{selectedSubtitle.filename}</h2>
+                  <div className="flex bg-[#F5F5F4] p-0.5 rounded-lg gap-0.5">
+                    <button
+                      onClick={() => setViewMode('vocabulary')}
+                      className={cn(
+                        "flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-bold transition-all",
+                        viewMode === 'vocabulary'
+                          ? "bg-black text-white shadow-xs"
+                          : "text-[#78716C] hover:text-black"
+                      )}
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>Vocabulary</span>
+                      {items.length > 0 && (
+                        <span className="text-[10px] font-mono opacity-80">({items.length})</span>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('listening')}
+                      className={cn(
+                        "flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-bold transition-all",
+                        viewMode === 'listening'
+                          ? "bg-black text-white shadow-xs"
+                          : "text-[#78716C] hover:text-black"
+                      )}
+                    >
+                      <Headphones className="w-3.5 h-3.5" />
+                      <span>Listening Traps</span>
+                      {listeningCount > 0 && (
+                        <span className="text-[10px] font-mono opacity-80">({listeningCount})</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                {viewMode === 'vocabulary' && (
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-[#A8A29E] uppercase tracking-wider">Levels:</span>
+                      <div className="flex gap-1">
+                        {LEVELS.map(l => (
+                          <button
+                            key={l}
+                            onClick={() => toggleLevel(l)}
+                            className={cn(
+                              "px-2 py-0.5 rounded text-[10px] font-bold transition-all",
+                              selectedLevels.includes(l) 
+                                ? "bg-black text-white" 
+                                : "bg-[#F5F5F4] text-[#78716C] hover:bg-[#E7E5E4]"
+                            )}
+                          >
+                            {l}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="h-3 w-px bg-[#E7E5E4]" />
+
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-[#A8A29E] uppercase tracking-wider">Order:</span>
+                      <div className="flex bg-[#F5F5F4] p-0.5 rounded-lg gap-0.5">
                         <button
-                          key={l}
-                          onClick={() => toggleLevel(l)}
+                          onClick={() => setOrderMode('chronological')}
+                          title="Chronological order (dialogue appearance)"
                           className={cn(
-                            "px-2 py-0.5 rounded text-[10px] font-bold transition-all",
-                            selectedLevels.includes(l) 
-                              ? "bg-black text-white" 
-                              : "bg-[#F5F5F4] text-[#78716C] hover:bg-[#E7E5E4]"
+                            "flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] font-bold transition-all",
+                            orderMode === 'chronological'
+                              ? "bg-black text-white shadow-xs"
+                              : "text-[#78716C] hover:text-black"
                           )}
                         >
-                          {l}
+                          <Clock className="w-3 h-3" />
+                          Chronological
                         </button>
-                      ))}
+                        <button
+                          onClick={() => setOrderMode('importance')}
+                          title="Ranked by Importance & Frequency (Tier 1 to 4)"
+                          className={cn(
+                            "flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] font-bold transition-all",
+                            orderMode === 'importance'
+                              ? "bg-black text-white shadow-xs"
+                              : "text-[#78716C] hover:text-black"
+                          )}
+                        >
+                          <ArrowDownWideNarrow className="w-3 h-3" />
+                          Importance & Frequency
+                        </button>
+                      </div>
                     </div>
                   </div>
+                )}
+              </div>
 
-                  <div className="h-3 w-px bg-[#E7E5E4]" />
-
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-bold text-[#A8A29E] uppercase tracking-wider">Order:</span>
-                    <div className="flex bg-[#F5F5F4] p-0.5 rounded-lg gap-0.5">
-                      <button
-                        onClick={() => setOrderMode('chronological')}
-                        title="Chronological order (dialogue appearance)"
-                        className={cn(
-                          "flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] font-bold transition-all",
-                          orderMode === 'chronological'
-                            ? "bg-black text-white shadow-xs"
-                            : "text-[#78716C] hover:text-black"
-                        )}
-                      >
-                        <Clock className="w-3 h-3" />
-                        Chronological
-                      </button>
-                      <button
-                        onClick={() => setOrderMode('importance')}
-                        title="Ranked by Importance & Frequency (Tier 1 to 4)"
-                        className={cn(
-                          "flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] font-bold transition-all",
-                          orderMode === 'importance'
-                            ? "bg-black text-white shadow-xs"
-                            : "text-[#78716C] hover:text-black"
-                        )}
-                      >
-                        <ArrowDownWideNarrow className="w-3 h-3" />
-                        Importance & Frequency
-                      </button>
-                    </div>
+              {viewMode === 'vocabulary' && (
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#A8A29E]" />
+                    <input 
+                      type="text"
+                      placeholder="Search words..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-9 pr-4 py-1.5 bg-[#F5F5F4] border-none rounded-full text-sm w-64 focus:ring-2 focus:ring-black/5 transition-all"
+                    />
                   </div>
+                  <button 
+                    onClick={processSubtitle}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-1.5 rounded-full text-sm font-medium hover:bg-emerald-700 transition-all disabled:opacity-50"
+                  >
+                    {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    {items.length > 0 ? 'Re-analyze' : 'Analyze Subtitle'}
+                  </button>
                 </div>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#A8A29E]" />
-                  <input 
-                    type="text"
-                    placeholder="Search words..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-9 pr-4 py-1.5 bg-[#F5F5F4] border-none rounded-full text-sm w-64 focus:ring-2 focus:ring-black/5 transition-all"
-                  />
-                </div>
-                <button 
-                  onClick={processSubtitle}
-                  disabled={isProcessing}
-                  className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-1.5 rounded-full text-sm font-medium hover:bg-emerald-700 transition-all disabled:opacity-50"
-                >
-                  {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  {items.length > 0 ? 'Re-analyze' : 'Analyze Subtitle'}
-                </button>
-              </div>
+              )}
             </header>
 
-            {/* Grid Content */}
+            {viewMode === 'listening' ? (
+              <ListeningView
+                subtitleId={selectedSubtitle.id}
+                subtitleFilename={selectedSubtitle.filename}
+                providerKey={providerConfig?.ttsProvider}
+              />
+            ) : (
+            /* Grid Content */
             <div className="flex-1 flex overflow-hidden">
               {/* Word List */}
               <div className="flex-1 overflow-y-auto p-8">
@@ -995,6 +1201,7 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
+            )}
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
